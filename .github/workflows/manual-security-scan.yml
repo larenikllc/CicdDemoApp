@@ -1,0 +1,35 @@
+name: Manual security scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to scan
+        required: true
+        default: master
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  dependency_scan:
+    name: Scan dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out selected ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore CicdDemoApp.sln
+
+      - name: Report vulnerable dependencies
+        run: dotnet list CicdDemoApp.sln package --vulnerable --include-transitive

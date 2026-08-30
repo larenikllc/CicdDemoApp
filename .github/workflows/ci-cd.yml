@@ -1,0 +1,174 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - master
+  push:
+    branches:
+      - develop
+      - master
+      - 'release/**'
+      - 'hotfix/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build_test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.version.outputs.should_release }}
+      artifact_name: ${{ steps.artifact.outputs.name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Calculate semantic version
+        id: version
+        shell: bash
+        run: .github/scripts/determine-version.sh
+
+      - name: Update version metadata
+        shell: bash
+        run: .github/scripts/update-version.sh "${{ steps.version.outputs.version }}"
+
+      - name: Generate changelog
+        shell: bash
+        run: .github/scripts/generate-changelog.sh "${{ steps.version.outputs.version }}"
+
+      - name: Restore dependencies
+        run: dotnet restore CicdDemoApp.sln
+
+      - name: Build
+        run: dotnet build CicdDemoApp.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test CicdDemoApp.sln --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+
+      - name: Publish application
+        if: >-
+          github.event_name == 'push' &&
+          (github.ref_name == 'master' ||
+          startsWith(github.ref, 'refs/heads/release/') ||
+          startsWith(github.ref, 'refs/heads/hotfix/'))
+        run: dotnet publish src/CicdDemoApp/CicdDemoApp.csproj --configuration Release --no-build --output publish
+
+      - name: Package versioned artifact
+        if: >-
+          github.event_name == 'push' &&
+          (github.ref_name == 'master' ||
+          startsWith(github.ref, 'refs/heads/release/') ||
+          startsWith(github.ref, 'refs/heads/hotfix/'))
+        shell: bash
+        run: |
+          cp CHANGELOG.md publish/CHANGELOG.md
+          cp Directory.Build.props publish/Directory.Build.props
+          cd publish
+          zip -r "../CicdDemoApp-v${{ steps.version.outputs.version }}.zip" .
+
+      - name: Define artifact name
+        id: artifact
+        shell: bash
+        run: echo "name=CicdDemoApp-${{ steps.version.outputs.version }}-${{ github.run_number }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload versioned artifact
+        if: >-
+          github.event_name == 'push' &&
+          (github.ref_name == 'master' ||
+          startsWith(github.ref, 'refs/heads/release/') ||
+          startsWith(github.ref, 'refs/heads/hotfix/'))
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: |
+            CicdDemoApp-v${{ steps.version.outputs.version }}.zip
+            CHANGELOG.md
+            Directory.Build.props
+          retention-days: 90
+          if-no-files-found: error
+
+  deploy_test:
+    name: Deploy to test
+    needs: build_test
+    if: >-
+      github.event_name == 'push' &&
+      (startsWith(github.ref, 'refs/heads/release/') ||
+      startsWith(github.ref, 'refs/heads/hotfix/'))
+    runs-on: ubuntu-latest
+    environment: Testing
+
+    steps:
+      - name: Download tested artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build_test.outputs.artifact_name }}
+
+      - name: Dummy test deployment
+        run: echo "Deploy to test"
+
+  deploy_prod:
+    name: Deploy to prod
+    needs: build_test
+    if: github.event_name == 'push' && github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    environment: Production
+
+    steps:
+      - name: Download tested artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build_test.outputs.artifact_name }}
+
+      - name: Dummy production deployment
+        run: echo "Deploy to prod"
+
+  create_release:
+    name: Create GitHub release
+    needs:
+      - build_test
+      - deploy_prod
+    if: >-
+      github.event_name == 'push' &&
+      github.ref_name == 'master' &&
+      needs.build_test.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build_test.outputs.artifact_name }}
+          path: release-assets
+
+      - name: Create tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: >-
+          gh release create "v${{ needs.build_test.outputs.version }}"
+          "release-assets/CicdDemoApp-v${{ needs.build_test.outputs.version }}.zip"
+          --target "${{ github.sha }}"
+          --title "CicdDemoApp v${{ needs.build_test.outputs.version }}"
+          --notes-file release-assets/CHANGELOG.md

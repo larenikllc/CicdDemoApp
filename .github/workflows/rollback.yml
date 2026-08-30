@@ -1,0 +1,37 @@
+name: Roll back production artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Workflow run ID that contains the previously approved artifact
+        required: true
+      artifact_name:
+        description: Exact artifact name from that workflow run
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  rollback:
+    name: Redeploy stored artifact
+    runs-on: ubuntu-latest
+    environment: Production
+
+    steps:
+      - name: Download stored artifact without rebuilding
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.run_id }}
+          name: ${{ inputs.artifact_name }}
+          path: rollback-artifact
+
+      - name: Dummy production rollback
+        shell: bash
+        run: |
+          echo "Redeploying stored artifact: ${{ inputs.artifact_name }}"
+          echo "Deploy to prod"
