@@ -31,12 +31,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
@@ -94,7 +94,7 @@ jobs:
           (github.ref_name == 'master' ||
           startsWith(github.ref, 'refs/heads/release/') ||
           startsWith(github.ref, 'refs/heads/hotfix/'))
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.artifact.outputs.name }}
           path: |
@@ -116,7 +116,7 @@ jobs:
 
     steps:
       - name: Download tested artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build_test.outputs.artifact_name }}
 
@@ -132,7 +132,7 @@ jobs:
 
     steps:
       - name: Download tested artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build_test.outputs.artifact_name }}
 
@@ -154,10 +154,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download release artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build_test.outputs.artifact_name }}
           path: release-assets
